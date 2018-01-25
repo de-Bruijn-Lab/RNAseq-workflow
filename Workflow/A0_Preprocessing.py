@@ -1,11 +1,7 @@
 #!/usr/bin/env python
 
-### 15/11/2016
-### Pipeline to connect multiple scripts together for FastQC quality control. 
-### Currently handles FastQC, Trimming, summarising and plotting statistics.
-### 
-### 07/06/2017
-### Updating pipeline to function with CBRG server changes. Servers have been updated to no longer allow qsub within clusters.
+### 25/01/2018
+### In house RNAseq workflow for the de Bruijn lab
 
 #####################
 
@@ -17,13 +13,10 @@ outf = open('A0_Progress.txt', 'w')
 Argument Parsing
 """
 
-parser = argparse.ArgumentParser(description='WIP basic FastQ QC and pre-processing pipeline. Trigger pipeline in the current directory you want the output to be generated.')
-
-parser.add_argument(
-	'-user', 
-	help = 'Required. User name for qsub submission',
-	required = True
+parser = argparse.ArgumentParser(
+	description='WIP basic FastQ QC and pre-processing pipeline. Trigger pipeline in the current directory you want the output to be generated.'
 )
+
 parser.add_argument(
 	'-f',
 	help = 'Required. Directory containing FastQ files',
@@ -32,7 +25,7 @@ parser.add_argument(
 parser.add_argument(
 	'-a',
 	choices=['nextera', 'illumina', 'small_rna'],
-	help = 'Specify adaptor used during library prep (nextera, illumina, small_rna). Default is auto detect'
+	help = 'Specify adaptor used during library prep (nextera, illumina, small_rna). Default is auto detect, when not specified'
 )
 parser.add_argument(
 	'-s',
@@ -41,11 +34,11 @@ parser.add_argument(
 )
 parser.add_argument(
 	'-namechange',
-	help = 'True if you want file names to be changed based on sample annotations'
+	help = 'True if you want file names to be changed based on sample annotations. Niche use, for when files are already the appropriate name.'
 )
 parser.add_argument(
 	'-trim',
-	help = "Required. True or False. Specify whether files should be trimmed.",
+	help = "Required. True or False. Specify whether files should be trimmed. Trimming is recommended, unless the trimming output is concerning.",
 	required = True
 )
 parser.add_argument(
@@ -60,7 +53,7 @@ parser.add_argument(
 )
 parser.add_argument(
 	'--FC',
-	help = 'Flag for Feature Counts. If present, will use subread tool to count reads mapping to genetic exons. If skipped, will still produce .sh files to generate Feature Counts table.',
+	help = 'Flag for Feature Counts. If present, will use subread tool to count reads mapping to genetic exons. If skipped, will still produce .sh files to generate Feature Counts table independently.',
         action = 'store_true'
 )
 parser.add_argument(
@@ -79,18 +72,14 @@ args = parser.parse_args()
 """
 Output preamble
 """
-outf.write("Mapping pipeline - vers. 09/06/2017\n\nParameters:\n")
-outf.write("User:\t" + args.user)
+
+### This should be more verbose, and should explain all parameters in use. ###
+outf.write("Mapping pipeline\n\nParameters:\n")
 outf.write("FastQ location:\t" + args.f)
 outf.write("Samples.txt:\t" + args.s)
 outf.write("Trimming:\t" + args.trim)
-#outf.write("Adaptor:\t" + args.a)
 outf.write("File name change?:\t" + args.namechange)
 outf.write("Run mapping?:\t" + args.maprun)
-#if ERCC:
-#	outf.write("ERCC:\tTrue\n\n")
-#else:
-#	outf.write("ERCC:\tFalse\n\n")
 
 """
 Sample setup
@@ -98,6 +87,8 @@ Sample setup
 """
 
 outf.write("--------------------\nA0_Preprocessing pipeline\n--------------------\n\n")
+
+# Read Sample sheet
 
 filenames=[]
 samples=[]
@@ -115,7 +106,7 @@ with open(args.s,'r') as f:
 	lanes.append(D)
 	pairs.append(E)
 
-# Determine pairing
+# Determine whether data is paired
 
 if len(set(pairs)) == 2:
 	paired = True
@@ -166,6 +157,9 @@ Create tmp files and rename
 
 # New file names!
 
+### Currently handles .gz compression and .sanfastq.gz, and .fastq/sanfastq
+### Any other file types to be used must be specified here, or a cleaner solution found.
+
 newFilenames = []
 extension = ""
 
@@ -206,9 +200,6 @@ FastQC - first run
 """
 outf.write("Running FastQC...\n")
 
-#os.system("module load fastqc/0.11.4")
-
-
 if args.trim == "True":
 	os.system("mkdir -p ./FastQC_PreTrim")
 	CmdFastQC = "fastqc -o ./FastQC_PreTrim -t 2 " + fqDir + "/*fastq*"
@@ -228,11 +219,13 @@ TrimGalore
 
 # Build trim command
 
+### Could do with optimising trim_galore parameters.
+### Could also attempt repeated mapping runs, with progressively aggressive trimming and taking the optimimum mapping rate - Very work intensive!
+
 if args.trim == "True":
 	outf.write("Trimming adaptors...\n")
 	
 	os.system("mkdir -p ./trim")
-	os.system("module load trim_galore/0.4.1")
 	
 	if args.a:
 		if paired == True:
@@ -256,9 +249,13 @@ if args.trim == "True":
 	
 	outf.write("\tAdaptors trimmed, Fastq files stored in ./trim, Trim stats stored in ./trim/trimOutput\n")
 	
+	# Call perl script for summarising Trimming statistics
+	
 	outf.write("\tExtracting summary of trim statistics to outputTrimStats.txt\n")
 	os.system("perl /t1-data/user/jharman/pipeline_v2/A1_Gather_Trim_statistics.pl ./trim/trimOutput/*.txt")
-
+	
+	# Call R script for visualising Trimming statistics
+	
 	outf.write("\tVisualising FastQ and Trimming statistics\n")
 	os.system("Rscript /t1-data/user/jharman/pipeline_v2/A2_TrimPlot.R")
 	
@@ -290,6 +287,9 @@ outf.write("--------------------\nB0_Mapping pipeline\n--------------------\n\n"
 """
 Rebuild new trimmed file names!
 """
+
+# Required, as trim galore changes file names, and changes them based on whether the data is paired or single end.
+
 trimFilenames = []
 
 for f in range(fileNum):
@@ -329,6 +329,9 @@ for f in range(fileNum):
 """
 Constructing STAR mapping command
 """
+
+# This is a complicated loop, but it works to construc the Star command! Leave as is, unless you want to optimise code.
+
 sampleCount = 0
 repCount = 0
 pairCount = 0
@@ -339,6 +342,7 @@ os.system("module load rna-star")
 outf.write("Seeding files for mapping...\n\n")
 
 # These first two loops are the seeding information to match the file being mapped. - i.e, the sample name and rep number.
+
 for s in range(len(set(samples))):
         for r in range(len(set(reps))):
                 cmd = []  # List of files for each sample mapping
@@ -424,6 +428,7 @@ os.system("mv ./StarBAM/*Log.final.out ./StarBAM/Log")
 os.system("mv ./StarBAM/*Log.progress.out ./StarBAM/Log")
 os.system("mv ./StarBAM/*SJ.out.tab ./StarBAM/Log")
 
+# Perl and R scripts for summarising and visualising mapping
 os.system("perl /t1-data/user/jharman/pipeline_v2/B1_Gather_Map_statistics.pl ./StarBAM/Log/*.final.out")
 os.system("Rscript /t1-data/user/jharman/pipeline_v2/B2_MapPlot.R")
 
@@ -431,6 +436,8 @@ os.system("Rscript /t1-data/user/jharman/pipeline_v2/B2_MapPlot.R")
 """
 Removing PCR duplicates
 """
+### Could switch this with Picard if required - Picard is more intensive, but also more accurate
+
 if args.PCR_Dedup == True:
 	if paired == True:
 		cmd = "samtools rmdup "
