@@ -2,14 +2,12 @@ use strict;
 use warnings;
 
 ### 10/11/2016
-### Input FastQ Trim output files
-### Read key trimming statistics
-### Output to file 
+# Input FastQ Trim output files
+# Read key trimming statistics
+# Output to file 
 
 
-###
 ### Setup. Create output file, print headers.
-###
 
 my $count = 1;
 
@@ -23,14 +21,14 @@ open (my $ofh, ">>", "./trim/trimOutput/outputTrimStats.txt")
 print $ofh "ProcessedReads\tProcessedBases\tTrimmedReads\tQuality-trimmed\tTrimmedBases\tTooShortReads\tTooLongReads\tTotalTime\tTimePerRead\n";
 
 
-###
 ### Open Sample.txt, loop through file lines. Extract stats between lines 21 & 29 and print to file
-###
 
 foreach my $file (@ARGV) {
 	open (my $fh, $file) 
 		or die "Cannot open $file : $!\n";
+		
 	$count = 1;
+	
 	while (<$fh>){
 		if ($count > 29){
 			close($fh);
